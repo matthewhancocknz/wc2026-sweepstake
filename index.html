@@ -24,9 +24,13 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
+const APP_VERSION = "v1.5 · 22 Jun";
+
 // ── API ───────────────────────────────────────────────────────────────────────
 const API_TOKEN = "630168be8740425a9a7e2cfd5d9737c1";
 const API_BASE  = "https://api.football-data.org/v4/competitions/WC/matches?season=2026";
+// football-data.org needs the X-Auth-Token header, which fails CORS from a local file://.
+// When hosted (GitHub Pages/Netlify) it works directly. From a local file we route via a proxy.
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "wc2026-sweepstake";
@@ -571,41 +575,62 @@ function App(){
   const fetchScores = async()=>{
     setFetching(true);
     setFetchError(null);
-    try{
-      const res = await fetch(API_BASE, {
-        headers:{"X-Auth-Token": API_TOKEN}
-      });
-      if(!res.ok) throw new Error(`API error ${res.status}`);
-      const data = await res.json();
-      const matches = data.matches || [];
-      const newScores = {...scores};
-      let updated = 0;
-      matches.forEach(m=>{
-        const stage = m.stage||"";
-        if(!stage.includes("GROUP")) return; // only group stage for now
-        const hn = normalise(m.homeTeam?.name||"");
-        const an = normalise(m.awayTeam?.name||"");
-        const ft = m.score?.fullTime;
-        if(!ft||ft.home==null||ft.away==null) return;
-        // Find matching fixture
-        const fix = GROUP_FIXTURES.find(f=>(f.home===hn&&f.away===an)||(f.home===an&&f.away===hn));
-        if(!fix) return;
-        const flipped = fix.home!==hn;
-        const hGoals = flipped?ft.away:ft.home;
-        const aGoals = flipped?ft.home:ft.away;
-        const existing = newScores[fix.id];
-        if(!existing||String(existing.home)!==String(hGoals)||String(existing.away)!==String(aGoals)){
-          newScores[fix.id]={home:String(hGoals),away:String(aGoals)};
-          updated++;
-        }
-      });
-      setScores(newScores);
-      const ts = new Date().toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit"});
-      setLastFetch(ts);
-      setFetchError(updated>0?`✓ Updated ${updated} score${updated!==1?"s":""}`:"✓ All scores up to date");
-    }catch(e){
-      setFetchError(`⚠️ ${e.message}`);
+
+    // Try a sequence of strategies until one works
+    const directUrl = API_BASE;
+    const tokenUrl  = `${API_BASE}&X-Auth-Token=${API_TOKEN}`;
+    const strategies = [
+      // 1. Direct (works when hosted online — football-data allows CORS)
+      ()=>fetch(directUrl, {headers:{"X-Auth-Token":API_TOKEN}}),
+      // 2. allorigins proxy (token in query string, reliable & free)
+      ()=>fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(tokenUrl)}`),
+      // 3. corsproxy.io fallback
+      ()=>fetch(`https://corsproxy.io/?url=${encodeURIComponent(tokenUrl)}`, {headers:{"X-Auth-Token":API_TOKEN}}),
+    ];
+
+    let data=null, lastErr=null;
+    for(const attempt of strategies){
+      try{
+        const res = await attempt();
+        if(!res.ok){ lastErr=new Error(`API responded ${res.status}`); continue; }
+        const json = await res.json();
+        if(json && Array.isArray(json.matches)){ data=json; break; }
+        lastErr=new Error("No match data in response");
+      }catch(e){ lastErr=e; }
     }
+
+    if(!data){
+      const local = window.location.protocol==="file:";
+      setFetchError(`⚠️ Couldn't fetch live scores (${lastErr?.message||"network error"}). ${local?"You're opening the file directly (file://) which browsers restrict — hosting it on GitHub Pages/Netlify makes auto-fetch reliable. ":""}You can still enter scores manually on the Scores tab.`);
+      setFetching(false);
+      return;
+    }
+
+    const matches = data.matches;
+    const newScores = {...scores};
+    let updated = 0;
+    matches.forEach(m=>{
+      const stage = m.stage||"";
+      if(!stage.includes("GROUP")) return;
+      const hn = normalise(m.homeTeam?.name||"");
+      const an = normalise(m.awayTeam?.name||"");
+      const ft = m.score?.fullTime;
+      if(!ft||ft.home==null||ft.away==null) return;
+      const fix = GROUP_FIXTURES.find(f=>(f.home===hn&&f.away===an)||(f.home===an&&f.away===hn));
+      if(!fix) return;
+      const flipped = fix.home!==hn;
+      const hGoals = flipped?ft.away:ft.home;
+      const aGoals = flipped?ft.home:ft.away;
+      const existing = newScores[fix.id];
+      if(!existing||String(existing.home)!==String(hGoals)||String(existing.away)!==String(aGoals)){
+        newScores[fix.id]={home:String(hGoals),away:String(aGoals)};
+        updated++;
+      }
+    });
+    setScores(newScores);
+    const ts = new Date().toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit"});
+    setLastFetch(ts);
+    setFetchError(updated>0?`✓ Updated ${updated} score${updated!==1?"s":""} from live data (${ts})`:`✓ All scores up to date (${ts})`);
     setFetching(false);
   };
 
@@ -669,12 +694,13 @@ function App(){
       {/* Header */}
       <div style={{background:"linear-gradient(90deg,#1a0a00,#2d1500,#1a0a00)",borderBottom:`2px solid ${GOLD}`,padding:"16px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
         <div>
-          <div style={{fontSize:9,letterSpacing:4,color:GOLD,textTransform:"uppercase",marginBottom:2}}>FIFA World Cup 2026</div>
+          <div style={{fontSize:9,letterSpacing:4,color:GOLD,textTransform:"uppercase",marginBottom:2}}>FIFA World Cup 2026 · {APP_VERSION}</div>
           <h1 style={{margin:0,fontSize:"clamp(17px,3.5vw,28px)",fontWeight:700,background:`linear-gradient(90deg,#f5d78e,${GOLD},#f5d78e)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
             Office Sweepstake 🏆
           </h1>
-          <div style={{fontSize:10,color:"#7a6040",marginTop:2,display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:10,color:"#7a6040",marginTop:2,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             <span>14 players · 3 teams each</span>
+            <span style={{color:"#5a4a30",background:"rgba(201,168,76,0.1)",padding:"1px 7px",borderRadius:10,fontSize:9,letterSpacing:0.5}}>{APP_VERSION}</span>
             {saved&&<span style={{color:"#95e17d"}}>✓ saved</span>}
             {lastFetch&&<span style={{color:"#6a9fd4"}}>⟳ scores: {lastFetch}</span>}
           </div>

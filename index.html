@@ -24,7 +24,7 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
-const APP_VERSION = "v1.5 · 22 Jun";
+const APP_VERSION = "v1.8 · 23 Jun — bracket";
 
 // ── API ───────────────────────────────────────────────────────────────────────
 const API_TOKEN = "630168be8740425a9a7e2cfd5d9737c1";
@@ -345,6 +345,57 @@ function computePts(assignments,names,scores,ko){
   return pts;
 }
 
+// Detailed per-player breakdown for the audit tab
+function auditPlayer(name,assignments,scores,ko){
+  const sq=assignments[name];
+  if(!sq)return {lines:[],total:0};
+  const standings=computeStandings(scores);
+  const rankings=getGroupRankings(standings);
+  const groupComplete={};
+  Object.keys(GROUPS).forEach(g=>{
+    groupComplete[g]=GROUP_FIXTURES.filter(f=>f.group===g).every(f=>{
+      const sc=scores[f.id];
+      return sc&&sc.home!=null&&sc.home!==""&&sc.away!=null&&sc.away!=="";
+    });
+  });
+  const toppers=new Set(Object.entries(rankings).filter(([g])=>groupComplete[g]).map(([,r])=>r[0]));
+  const tiers=[["elite",sq.elite],["contender",sq.contender],["underdog",sq.underdog]];
+  const lines=[];
+  let total=0;
+  tiers.forEach(([tier,teamObj])=>{
+    const team=teamObj.name;
+    const teamLines=[];
+    GROUP_FIXTURES.forEach(fix=>{
+      const sc=scores[fix.id];
+      if(!sc||sc.home==null||sc.away==null||sc.home===""||sc.away==="")return;
+      const hg=parseInt(sc.home),ag=parseInt(sc.away);
+      if(isNaN(hg)||isNaN(ag))return;
+      if(fix.home!==team&&fix.away!==team)return;
+      const isHome=fix.home===team;
+      const won=isHome?hg>ag:ag>hg;
+      const drew=hg===ag;
+      const scored=isHome?hg:ag;
+      const opp=isHome?fix.away:fix.home;
+      const scoreStr=isHome?`${hg}-${ag} vs ${opp}`:`${ag}-${hg} vs ${opp}`;
+      if(won){teamLines.push({label:`Win (${scoreStr})`,pts:PTS.groupWin});total+=PTS.groupWin;}
+      else if(drew){teamLines.push({label:`Draw (${scoreStr})`,pts:0,muted:true});}
+      else {teamLines.push({label:`Loss (${scoreStr})`,pts:0,muted:true});}
+      if(scored>=5){teamLines.push({label:`⭐ Scored ${scored} goals`,pts:PTS.fiveGoals});total+=PTS.fiveGoals;}
+      if(!ELITE_SET.has(team)&&ELITE_SET.has(opp)&&won){teamLines.push({label:`🚀 Underdog beat Elite (${opp})`,pts:PTS.underdogElite});total+=PTS.underdogElite;}
+    });
+    if(toppers.has(team)){teamLines.push({label:`🥇 Topped group`,pts:PTS.groupTop});total+=PTS.groupTop;}
+    if(ko?.r32?.includes(team)){teamLines.push({label:`Won Round of 32`,pts:PTS.r32Win});total+=PTS.r32Win;}
+    if(ko?.r16?.includes(team)){teamLines.push({label:`Won Round of 16`,pts:PTS.r16Win});total+=PTS.r16Win;}
+    if(ko?.qf?.includes(team)){teamLines.push({label:`Reached Quarter-Final`,pts:PTS.qfWin});total+=PTS.qfWin;}
+    if(ko?.sf?.includes(team)){teamLines.push({label:`Reached Semi-Final`,pts:PTS.sfWin});total+=PTS.sfWin;}
+    if(ko?.final?.includes(team)){teamLines.push({label:`Reached Final`,pts:PTS.finalWin});total+=PTS.finalWin;}
+    if(ko?.champion===team){teamLines.push({label:`🎖️ Won the World Cup`,pts:PTS.champion});total+=PTS.champion;}
+    if(ko?.goldenBoot===team){teamLines.push({label:`👟 Golden Boot`,pts:PTS.goldenBoot});total+=PTS.goldenBoot;}
+    lines.push({tier,team,flag:teamObj.flag,teamLines});
+  });
+  return {lines,total};
+}
+
 // ── PRINT ─────────────────────────────────────────────────────────────────────
 function openPrint(assignments,names,cPts){
   const sorted=[...names].sort((a,b)=>(cPts[b]||0)-(cPts[a]||0));
@@ -381,139 +432,174 @@ function ScoreInput({fixture,score,onChange}){
           style={{width:34,textAlign:"center",background:"rgba(255,255,255,0.08)",border:"1px solid rgba(201,168,76,0.3)",borderRadius:5,color:"#f5d78e",fontFamily:"Georgia,serif",fontSize:15,fontWeight:700,padding:"3px 0",outline:"none"}}/>
         <span style={{fontSize:11,color:res==="away"?"#f5d78e":"#888",fontWeight:res==="away"?700:400,minWidth:90,whiteSpace:"nowrap",overflow:"hidden"}}>{fixture.away} {FLAGS[fixture.away]}</span>
       </div>
-      {done&&(hg+ag>=5)&&<span title="5+ goals bonus!">🎯</span>}
+      {done&&(hg>=5||ag>=5)&&<span title="5+ goals by one team — bonus!">🎯</span>}
     </div>
   );
 }
 
 // ── KNOCKOUT LADDER ───────────────────────────────────────────────────────────
-function KnockoutLadder({ko, setKo, standings, rankings, scores, drawn, assignments, names}){
+function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignments, names}){
   const ALL_NATIONS = Object.values(GROUPS).flat();
 
-  // Which teams are in the sweepstake?
-  const sweepTeams = drawn && assignments
-    ? new Set(names.flatMap(n=>[assignments[n]?.elite?.name, assignments[n]?.contender?.name, assignments[n]?.underdog?.name].filter(Boolean)))
-    : new Set();
-
-  // Owners lookup
+  // Owners + sweepstake lookup
   const teamOwner = {};
+  const sweepTeams = new Set();
   if(drawn && assignments){
     names.forEach(n=>{
       const sq=assignments[n];
-      if(sq){
-        [sq.elite,sq.contender,sq.underdog].forEach(t=>{ if(t) teamOwner[t.name]=n; });
-      }
+      if(sq){[sq.elite,sq.contender,sq.underdog].forEach(t=>{ if(t){teamOwner[t.name]=n;sweepTeams.add(t.name);} });}
     });
   }
 
-  const rounds = [
-    {key:"r32", label:"Round of 32", pts:PTS.r32Win, cols:16},
-    {key:"r16", label:"Round of 16", pts:PTS.r16Win, cols:8},
-    {key:"qf",  label:"Quarter-Finals", pts:PTS.qfWin, cols:4},
-    {key:"sf",  label:"Semi-Finals", pts:PTS.sfWin, cols:2},
-    {key:"final", label:"Final", pts:PTS.finalWin, cols:2},
-  ];
+  // Bracket lives inside ko.bracket: { slots:{r32:[16 pairs]}, winners:{r32:[16],r16:[8],qf:[4],sf:[2],final:[1]} }
+  // We store the 32 entrants in ko.entrants (array length 32), and winners per round.
+  const entrants = ko.entrants || Array(32).fill("");
+  const winners  = ko.winners  || {r32:Array(16).fill(""),r16:Array(8).fill(""),qf:Array(4).fill(""),sf:Array(2).fill(""),final:Array(1).fill("")};
 
-  const toggle=(round,team)=>{
-    setKo(prev=>{
-      const arr=prev[round]||[];
-      return{...prev,[round]:arr.includes(team)?arr.filter(t=>t!==team):[...arr,team]};
-    });
+  // Sync derived round-arrays into ko (r32/r16/qf/sf/final) so points calc works
+  const syncToKo = (newEntrants,newWinners)=>{
+    const flat = (arr)=>arr.filter(Boolean);
+    // Each list = teams that WON that round's match (no overlap):
+    //   r32 (+2), r16 (+3), qf (+5), sf (+8), final winner (+12), champion (+20)
+    const champ = newWinners.final[0]||"";
+    setKo(prev=>({
+      ...prev,
+      entrants:newEntrants,
+      winners:newWinners,
+      r32:flat(newWinners.r32),
+      r16:flat(newWinners.r16),
+      qf:flat(newWinners.qf),
+      sf:flat(newWinners.sf),
+      final:flat(newWinners.final),
+      champion:champ,
+    }));
   };
 
-  const TeamPill=({team,active,onClick,small})=>{
+  const setEntrant=(i,team)=>{
+    const ne=[...entrants]; ne[i]=team;
+    // clear downstream winners if entrant changed
+    const nw=JSON.parse(JSON.stringify(winners));
+    nw.r32=Array(16).fill("");nw.r16=Array(8).fill("");nw.qf=Array(4).fill("");nw.sf=Array(2).fill("");nw.final=Array(1).fill("");
+    syncToKo(ne,nw);
+  };
+
+  // pick winner of a match in a round -> advances to next round slot
+  const pickWinner=(round,matchIdx,team)=>{
+    const nw=JSON.parse(JSON.stringify(winners));
+    nw[round][matchIdx]=team;
+    // clear everything downstream of this pick
+    const order=["r32","r16","qf","sf","final"];
+    const ri=order.indexOf(round);
+    for(let k=ri+1;k<order.length;k++){
+      const len={r16:8,qf:4,sf:2,final:1}[order[k]];
+      nw[order[k]]=Array(len).fill("");
+    }
+    syncToKo(entrants,nw);
+  };
+
+  // Get the two teams competing in a given round/match
+  const getMatchTeams=(round,matchIdx)=>{
+    if(round==="r32"){
+      return [entrants[matchIdx*2]||"", entrants[matchIdx*2+1]||""];
+    }
+    const prevRound={r16:"r32",qf:"r16",sf:"qf",final:"sf"}[round];
+    return [winners[prevRound][matchIdx*2]||"", winners[prevRound][matchIdx*2+1]||""];
+  };
+
+  const ROUNDS=[
+    {key:"r32",label:"Round of 32",matches:16,pts:PTS.r32Win},
+    {key:"r16",label:"Round of 16",matches:8,pts:PTS.r16Win},
+    {key:"qf", label:"Quarter-Finals",matches:4,pts:PTS.qfWin},
+    {key:"sf", label:"Semi-Finals",matches:2,pts:PTS.sfWin},
+    {key:"final",label:"Final",matches:1,pts:PTS.finalWin},
+  ];
+
+  const champion = winners.final[0]||"";
+
+  const TeamSlot=({team,onClick,selected,empty,small})=>{
     const isSweep=sweepTeams.has(team);
     const owner=teamOwner[team];
     return(
-      <button onClick={onClick} title={owner?`${team} — ${owner}'s team`:team} style={{
-        padding:small?"3px 8px":"5px 11px",
-        borderRadius:20,cursor:"pointer",fontFamily:"Georgia,serif",
-        fontSize:small?10:11,
-        background:active?"rgba(201,168,76,0.25)":"rgba(255,255,255,0.04)",
-        border:`1px solid ${active?GOLD:isSweep?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.1)"}`,
-        color:active?"#f5d78e":isSweep?GOLD:"#777",
-        fontWeight:active?700:400,
-        display:"flex",alignItems:"center",gap:4,
+      <div onClick={onClick} title={owner?`${team} — ${owner}`:team} style={{
+        cursor:onClick?"pointer":"default",
+        padding:small?"4px 7px":"5px 9px",
+        borderRadius:6,
+        background:selected?"rgba(201,168,76,0.25)":empty?"rgba(255,255,255,0.02)":"rgba(255,255,255,0.05)",
+        border:`1px solid ${selected?GOLD:isSweep?"rgba(201,168,76,0.35)":"rgba(255,255,255,0.08)"}`,
+        color:selected?"#f5d78e":empty?"#555":isSweep?GOLD:"#bbb",
+        fontSize:small?10:11,fontWeight:selected?700:400,
+        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:140,
+        display:"flex",alignItems:"center",gap:4,marginBottom:3,
       }}>
-        {FLAGS[team]||""} {team}
-        {isSweep&&<span style={{fontSize:8,color:active?"#f5d78e":GOLD}}>★</span>}
-      </button>
+        {team?(<>{FLAGS[team]||""} <span style={{overflow:"hidden",textOverflow:"ellipsis"}}>{team}</span> {isSweep&&<span style={{fontSize:8}}>★</span>}</>):<span style={{fontStyle:"italic"}}>—</span>}
+      </div>
     );
   };
 
   return(
     <div>
       <div style={{...secTitle,marginBottom:6}}>🏆 Knockout Bracket</div>
-      <p style={{color:"#a89070",fontSize:13,marginBottom:20}}>
-        Tick each team as they win their match. ★ = your sweepstake team. Points update live.
+      <p style={{color:"#a89070",fontSize:13,marginBottom:8}}>
+        1️⃣ Fill the 32 entrants (left column) once groups finish. 2️⃣ Click a team in any match to advance them. Winners chart through to the final and points update live.
       </p>
+      {champion&&<div style={{marginBottom:16,padding:"10px 16px",background:"rgba(201,168,76,0.12)",border:`1px solid ${GOLD}`,borderRadius:8,fontSize:15,color:"#f5d78e",fontWeight:700}}>🎖️ Champion: {FLAGS[champion]} {champion}{teamOwner[champion]?` — ${teamOwner[champion]}`:""}</div>}
 
-      {rounds.map(({key,label,pts,cols})=>(
-        <div key={key} style={{marginBottom:28}}>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
-            <div style={{color:GOLD,fontSize:13,fontWeight:700}}>{label}</div>
-            <div style={{color:"#555",fontSize:11}}>+{pts} pts per team</div>
-            <div style={{color:"#95e17d",fontSize:11}}>{(ko[key]||[]).length} teams through</div>
-          </div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-            {ALL_NATIONS.map(team=>{
-              const active=(ko[key]||[]).includes(team);
-              return <TeamPill key={team} team={team} active={active} onClick={()=>toggle(key,team)}/>;
-            })}
-          </div>
-          {/* Show who's through in a highlighted strip */}
-          {(ko[key]||[]).length>0&&(
-            <div style={{marginTop:8,padding:"8px 12px",background:"rgba(201,168,76,0.06)",border:"1px solid rgba(201,168,76,0.2)",borderRadius:8}}>
-              <span style={{color:"#888",fontSize:11,marginRight:8}}>Through:</span>
-              {(ko[key]||[]).map(t=>(
-                <span key={t} style={{fontSize:13,marginRight:6}} title={teamOwner[t]?`${t} — ${teamOwner[t]}`:""}>{FLAGS[t]} {t}{teamOwner[t]?` (${teamOwner[t]})`:""}  </span>
-              ))}
+      <div style={{overflowX:"auto",paddingBottom:12}}>
+        <div style={{display:"flex",gap:14,minWidth:900}}>
+          {ROUNDS.map((rd,ri)=>(
+            <div key={rd.key} style={{flex:"0 0 auto",width:160}}>
+              <div style={{color:GOLD,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8,textAlign:"center"}}>
+                {rd.label}<div style={{color:"#555",fontSize:9,fontWeight:400}}>+{rd.pts} pts</div>
+              </div>
+              {Array.from({length:rd.matches}).map((_,mi)=>{
+                const [t1,t2]=getMatchTeams(rd.key,mi);
+                const w=winners[rd.key][mi];
+                // spacing to create bracket look
+                const gap=ri===0?0:Math.pow(2,ri)*14;
+                return(
+                  <div key={mi} style={{marginBottom:ri===0?10:gap+10,marginTop:ri===0?0:gap}}>
+                    {rd.key==="r32"?(
+                      <>
+                        <select value={t1} onChange={e=>setEntrant(mi*2,e.target.value)}
+                          style={{width:"100%",marginBottom:3,background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:5,color:t1?"#bbb":"#555",fontFamily:"Georgia,serif",fontSize:10,padding:"3px 4px",outline:"none"}}>
+                          <option value="">— team —</option>
+                          {ALL_NATIONS.map(t=><option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <select value={t2} onChange={e=>setEntrant(mi*2+1,e.target.value)}
+                          style={{width:"100%",marginBottom:5,background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:5,color:t2?"#bbb":"#555",fontFamily:"Georgia,serif",fontSize:10,padding:"3px 4px",outline:"none"}}>
+                          <option value="">— team —</option>
+                          {ALL_NATIONS.map(t=><option key={t} value={t}>{t}</option>)}
+                        </select>
+                        {(t1||t2)&&(
+                          <div style={{display:"flex",gap:3,marginBottom:2}}>
+                            {t1&&<button onClick={()=>pickWinner("r32",mi,t1)} style={{flex:1,fontSize:9,padding:"2px",borderRadius:4,cursor:"pointer",fontFamily:"Georgia,serif",background:w===t1?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.04)",border:`1px solid ${w===t1?GOLD:"rgba(255,255,255,0.1)"}`,color:w===t1?"#f5d78e":"#888"}}>▲ {FLAGS[t1]}</button>}
+                            {t2&&<button onClick={()=>pickWinner("r32",mi,t2)} style={{flex:1,fontSize:9,padding:"2px",borderRadius:4,cursor:"pointer",fontFamily:"Georgia,serif",background:w===t2?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.04)",border:`1px solid ${w===t2?GOLD:"rgba(255,255,255,0.1)"}`,color:w===t2?"#f5d78e":"#888"}}>▼ {FLAGS[t2]}</button>}
+                          </div>
+                        )}
+                      </>
+                    ):(
+                      <div style={{border:"1px solid rgba(255,255,255,0.06)",borderRadius:7,padding:"5px",background:"rgba(255,255,255,0.015)"}}>
+                        <TeamSlot team={t1} empty={!t1} selected={w===t1&&!!t1} small onClick={t1?()=>pickWinner(rd.key,mi,t1):null}/>
+                        <TeamSlot team={t2} empty={!t2} selected={w===t2&&!!t2} small onClick={t2?()=>pickWinner(rd.key,mi,t2):null}/>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </div>
-      ))}
-
-      {/* Champion */}
-      <div style={{marginBottom:24}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
-          <div style={{color:GOLD,fontSize:13,fontWeight:700}}>🥇 World Cup Champion</div>
-          <div style={{color:"#555",fontSize:11}}>+{PTS.champion} pts</div>
-        </div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {["none",...ALL_NATIONS].map(team=>{
-            const val=team==="none"?"":team;
-            const active=ko.champion===val;
-            return(
-              <button key={team} onClick={()=>setKo(p=>({...p,champion:val}))} style={{
-                padding:"5px 11px",borderRadius:20,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:11,
-                background:active?"rgba(201,168,76,0.25)":"rgba(255,255,255,0.04)",
-                border:`1px solid ${active?GOLD:"rgba(255,255,255,0.1)"}`,
-                color:active?"#f5d78e":"#777",fontWeight:active?700:400,
-              }}>
-                {team==="none"?"— none yet —":`${FLAGS[team]||""} ${team}`}
-              </button>
-            );
-          })}
+          ))}
         </div>
       </div>
 
       {/* Golden Boot */}
-      <div style={{marginBottom:24}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
-          <div style={{color:GOLD,fontSize:13,fontWeight:700}}>👟 Golden Boot (team of winner)</div>
-          <div style={{color:"#555",fontSize:11}}>+{PTS.goldenBoot} pts</div>
-        </div>
+      <div style={{marginTop:24,paddingTop:18,borderTop:"1px solid rgba(201,168,76,0.15)"}}>
+        <div style={{color:GOLD,fontSize:13,fontWeight:700,marginBottom:10}}>👟 Golden Boot (team of top scorer) <span style={{color:"#555",fontWeight:400}}>+{PTS.goldenBoot} pts</span></div>
         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
           {["none",...ALL_NATIONS].map(team=>{
             const val=team==="none"?"":team;
             const active=ko.goldenBoot===val;
             return(
-              <button key={team} onClick={()=>setKo(p=>({...p,goldenBoot:val}))} style={{
-                padding:"5px 11px",borderRadius:20,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:11,
-                background:active?"rgba(201,168,76,0.25)":"rgba(255,255,255,0.04)",
-                border:`1px solid ${active?GOLD:"rgba(255,255,255,0.1)"}`,
-                color:active?"#f5d78e":"#777",fontWeight:active?700:400,
-              }}>
+              <button key={team} onClick={()=>setKo(p=>({...p,goldenBoot:val}))} style={{padding:"5px 11px",borderRadius:20,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:11,background:active?"rgba(201,168,76,0.25)":"rgba(255,255,255,0.04)",border:`1px solid ${active?GOLD:"rgba(255,255,255,0.1)"}`,color:active?"#f5d78e":"#777",fontWeight:active?700:400}}>
                 {team==="none"?"— none yet —":`${FLAGS[team]||""} ${team}`}
               </button>
             );
@@ -684,6 +770,7 @@ function App(){
     {id:"scores",   label:"⚽ Scores",    disabled:!drawn},
     {id:"knockout", label:"🏆 Knockout",  disabled:!drawn},
     {id:"overrides",label:"✏️ Overrides", disabled:!drawn},
+    {id:"audit",label:"🔍 Audit", disabled:!drawn},
     {id:"leaderboard",label:"📊 Leaderboard",disabled:!drawn},
     {id:"fixtures", label:"📅 Fixtures"},
   ];
@@ -980,6 +1067,57 @@ function App(){
                         style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:5,color:"#c0b090",fontFamily:"Georgia,serif",fontSize:12,padding:"5px 8px",outline:"none"}}/>
                     </div>
                     {ov.note&&<div style={{marginTop:6,fontSize:11,color:"#7a6040",fontStyle:"italic"}}>📝 {ov.note}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── AUDIT ── */}
+        {tab==="audit"&&drawn&&(
+          <div>
+            <div style={secTitle}>🔍 Points Audit</div>
+            <p style={{color:"#a89070",fontSize:13,marginBottom:20}}>Every point each player has earned, broken down by team and reason. Use this to verify totals.</p>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(330px,1fr))",gap:12}}>
+              {[...names].sort((a,b)=>(cPts[b]||0)-(cPts[a]||0)).map(name=>{
+                const audit=auditPlayer(name,assignments,scores,ko);
+                const ovPts=parseInt(overrides[name]?.pts)||0;
+                const grand=audit.total+ovPts;
+                return(
+                  <div key={name} style={{...card,padding:"14px 16px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,paddingBottom:8,borderBottom:"1px solid rgba(201,168,76,0.15)"}}>
+                      <div style={{fontWeight:700,fontSize:15,color:"#f5d78e"}}>{name}</div>
+                      <div style={{background:"rgba(201,168,76,0.15)",border:"1px solid rgba(201,168,76,0.4)",borderRadius:20,padding:"2px 12px",fontSize:14,color:GOLD,fontWeight:700}}>{grand} pts</div>
+                    </div>
+                    {audit.lines.map(({tier,team,flag,teamLines})=>{
+                      const subtotal=teamLines.reduce((s,l)=>s+(l.pts||0),0);
+                      const tierColor={elite:"#ff6b6b",contender:"#4ecdc4",underdog:"#95e17d"}[tier];
+                      return(
+                        <div key={tier} style={{marginBottom:10}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <span style={{fontSize:12,fontWeight:700,color:tierColor}}>{flag} {team}</span>
+                            <span style={{fontSize:12,color:subtotal>0?GOLD:"#555",fontWeight:700}}>{subtotal} pts</span>
+                          </div>
+                          {teamLines.length===0?(
+                            <div style={{fontSize:11,color:"#555",paddingLeft:8,fontStyle:"italic"}}>No points yet</div>
+                          ):(
+                            teamLines.map((l,li)=>(
+                              <div key={li} style={{display:"flex",justifyContent:"space-between",fontSize:11,paddingLeft:8,marginBottom:2,color:l.muted?"#666":"#c0b090"}}>
+                                <span>{l.label}</span>
+                                <span style={{color:l.pts>0?"#95e17d":"#555",fontWeight:l.pts>0?700:400,minWidth:30,textAlign:"right"}}>{l.pts>0?`+${l.pts}`:"0"}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      );
+                    })}
+                    {ovPts!==0&&(
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,paddingTop:8,borderTop:"1px solid rgba(255,255,255,0.08)",color:ovPts>0?"#95e17d":"#ff9999"}}>
+                        <span>✏️ Manual override{overrides[name]?.note?` (${overrides[name].note})`:""}</span>
+                        <span style={{fontWeight:700,minWidth:30,textAlign:"right"}}>{ovPts>0?`+${ovPts}`:ovPts}</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}

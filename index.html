@@ -59,7 +59,7 @@ const GROUP_FIXTURES = Object.entries(GROUPS).flatMap(([g,[t1,t2,t3,t4]])=>[
 const FLAGS = {
   "Mexico":"🇲🇽","South Africa":"🇿🇦","South Korea":"🇰🇷","Czechia":"🇨🇿",
   "Canada":"🇨🇦","Switzerland":"🇨🇭","Qatar":"🇶🇦","Bosnia & Herz.":"🇧🇦",
-  "Brazil":"🇧🇷","Morocco":"🇲🇦","Haiti":"🇭🇹","Scotland":"🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+  "Brazil":"🇧🇷","Morocco":"🇲🇦","Haiti":"🇭🇹","Scotland":"🏴󠁧󠁢",
   "USA":"🇺🇸","Paraguay":"🇵🇾","Australia":"🇦🇺","Türkiye":"🇹🇷",
   "Germany":"🇩🇪","Curaçao":"🇨🇼","Côte d'Ivoire":"🇨🇮","Ecuador":"🇪🇨",
   "Netherlands":"🇳🇱","Japan":"🇯🇵","Sweden":"🇸🇪","Tunisia":"🇹🇳",
@@ -230,7 +230,7 @@ const ALL_TEAMS = {
 const ELITE_SET = new Set(ALL_TEAMS.elite.map(t=>t.name));
 const UNDERDOG_SET = new Set(ALL_TEAMS.underdog.map(t=>t.name));
 const ALL_14 = [...ALL_TEAMS.elite,...ALL_TEAMS.contender,...ALL_TEAMS.underdog];
-const PTS = {groupWin:1,reachR32:2,groupTop:4,r32Win:2,r16Win:3,qfWin:5,sfWin:8,finalWin:12,champion:20,fiveGoals:2,underdogElite:5,goldenBoot:5};
+const PTS = {groupWin:1,reachR32:2,groupTop:2,r32Win:2,r16Win:3,qfWin:5,sfWin:8,finalWin:12,champion:20,fiveGoals:2,underdogElite:5,goldenBoot:5};
 
 const PRESET_NAMES = ["Terrie","Olivia","Roger","Felix","Lynette","Matt","Alvin","Jake","Ai Fen","James","Joe","Ruth","Natale","Thomas"];
 const PRESET_ASSIGNMENTS = {

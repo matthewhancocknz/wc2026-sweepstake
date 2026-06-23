@@ -24,7 +24,7 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
-const APP_VERSION = "v1.9 · 23 Jun";
+const APP_VERSION = "v2.0 · 23 Jun";
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "wc2026-sweepstake";
@@ -228,6 +228,7 @@ const ALL_TEAMS = {
 };
 
 const ELITE_SET = new Set(ALL_TEAMS.elite.map(t=>t.name));
+const UNDERDOG_SET = new Set(ALL_TEAMS.underdog.map(t=>t.name));
 const ALL_14 = [...ALL_TEAMS.elite,...ALL_TEAMS.contender,...ALL_TEAMS.underdog];
 const PTS = {groupWin:1,groupTop:3,r32Win:2,r16Win:3,qfWin:5,sfWin:8,finalWin:12,champion:20,fiveGoals:2,underdogElite:5,goldenBoot:5};
 
@@ -313,7 +314,7 @@ function computePts(assignments,names,scores,ko){
         const opp=isHome?fix.away:fix.home;
         if(won)p+=PTS.groupWin;
         if(scored>=5)p+=PTS.fiveGoals;
-        if(!ELITE_SET.has(team)&&ELITE_SET.has(opp)&&won)p+=PTS.underdogElite;
+        if(UNDERDOG_SET.has(team)&&ELITE_SET.has(opp)&&won)p+=PTS.underdogElite;
       });
       if(toppers.has(team))p+=PTS.groupTop;
       if(ko?.r32?.includes(team))p+=PTS.r32Win;
@@ -365,7 +366,7 @@ function auditPlayer(name,assignments,scores,ko){
       else if(drew){teamLines.push({label:`Draw (${scoreStr})`,pts:0,muted:true});}
       else {teamLines.push({label:`Loss (${scoreStr})`,pts:0,muted:true});}
       if(scored>=5){teamLines.push({label:`⭐ Scored ${scored} goals`,pts:PTS.fiveGoals});total+=PTS.fiveGoals;}
-      if(!ELITE_SET.has(team)&&ELITE_SET.has(opp)&&won){teamLines.push({label:`🚀 Underdog beat Elite (${opp})`,pts:PTS.underdogElite});total+=PTS.underdogElite;}
+      if(UNDERDOG_SET.has(team)&&ELITE_SET.has(opp)&&won){teamLines.push({label:`🚀 Underdog beat Elite (${opp})`,pts:PTS.underdogElite});total+=PTS.underdogElite;}
     });
     if(toppers.has(team)){teamLines.push({label:`🥇 Topped group`,pts:PTS.groupTop});total+=PTS.groupTop;}
     if(ko?.r32?.includes(team)){teamLines.push({label:`Won Round of 32`,pts:PTS.r32Win});total+=PTS.r32Win;}

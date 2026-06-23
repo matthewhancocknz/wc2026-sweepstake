@@ -24,13 +24,7 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
-const APP_VERSION = "v1.8 · 23 Jun — bracket";
-
-// ── API ───────────────────────────────────────────────────────────────────────
-const API_TOKEN = "630168be8740425a9a7e2cfd5d9737c1";
-const API_BASE  = "https://api.football-data.org/v4/competitions/WC/matches?season=2026";
-// football-data.org needs the X-Auth-Token header, which fails CORS from a local file://.
-// When hosted (GitHub Pages/Netlify) it works directly. From a local file we route via a proxy.
+const APP_VERSION = "v1.9 · 23 Jun";
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "wc2026-sweepstake";
@@ -77,16 +71,6 @@ const FLAGS = {
   "England":"🏴󠁧󠁢󠁥󠁮󠁧󠁿","Croatia":"🇭🇷","Ghana":"🇬🇭","Panama":"🇵🇦",
 };
 
-// API name → our name mapping
-const API_NAME_MAP = {
-  "Korea Republic":"South Korea","Iran":"Iran","Bosnia and Herzegovina":"Bosnia & Herz.",
-  "Côte d'Ivoire":"Côte d'Ivoire","Ivory Coast":"Côte d'Ivoire","Cote d'Ivoire":"Côte d'Ivoire",
-  "DR Congo":"DR Congo","Congo DR":"DR Congo","Democratic Republic of Congo":"DR Congo",
-  "Türkiye":"Türkiye","Turkey":"Türkiye","Cabo Verde":"Cabo Verde","Cape Verde":"Cabo Verde",
-  "Curacao":"Curaçao","Curaçao":"Curaçao","USA":"USA","United States":"USA",
-  "New Zealand":"New Zealand","Czech Republic":"Czechia","Czechia":"Czechia",
-};
-function normalise(n){ return API_NAME_MAP[n]||n; }
 
 // NZT fixture schedule (ET+16h = NZT)
 const FIXTURES_NZT = [
@@ -627,9 +611,6 @@ function App(){
   const [importText,setImportText] = useState("");
   const [importError,setImportError] = useState("");
   const [saved,setSaved]     = useState(false);
-  const [fetching,setFetching] = useState(false);
-  const [lastFetch,setLastFetch] = useState(null);
-  const [fetchError,setFetchError] = useState(null);
 
   // Load on mount
   useEffect(()=>{
@@ -641,7 +622,6 @@ function App(){
       setScores(d.scores||{});
       setKo(d.ko||emptyKo);
       setOverrides(d.overrides||emptyOverrides);
-      if(d.lastFetch)setLastFetch(d.lastFetch);
       if(d.drawn!=null?d.drawn:true) setTab("squads");
     }
   },[]);
@@ -654,74 +634,8 @@ function App(){
   },[]);
 
   useEffect(()=>{
-    persist({names,assignments,drawn,scores,ko,overrides,lastFetch});
-  },[names,assignments,drawn,scores,ko,overrides,lastFetch]);
-
-  // ── AUTO-FETCH SCORES ──────────────────────────────────────────────────────
-  const fetchScores = async()=>{
-    setFetching(true);
-    setFetchError(null);
-
-    // Try a sequence of strategies until one works
-    const directUrl = API_BASE;
-    const tokenUrl  = `${API_BASE}&X-Auth-Token=${API_TOKEN}`;
-    const strategies = [
-      // 1. Direct (works when hosted online — football-data allows CORS)
-      ()=>fetch(directUrl, {headers:{"X-Auth-Token":API_TOKEN}}),
-      // 2. allorigins proxy (token in query string, reliable & free)
-      ()=>fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(tokenUrl)}`),
-      // 3. corsproxy.io fallback
-      ()=>fetch(`https://corsproxy.io/?url=${encodeURIComponent(tokenUrl)}`, {headers:{"X-Auth-Token":API_TOKEN}}),
-    ];
-
-    let data=null, lastErr=null;
-    for(const attempt of strategies){
-      try{
-        const res = await attempt();
-        if(!res.ok){ lastErr=new Error(`API responded ${res.status}`); continue; }
-        const json = await res.json();
-        if(json && Array.isArray(json.matches)){ data=json; break; }
-        lastErr=new Error("No match data in response");
-      }catch(e){ lastErr=e; }
-    }
-
-    if(!data){
-      const local = window.location.protocol==="file:";
-      setFetchError(`⚠️ Couldn't fetch live scores (${lastErr?.message||"network error"}). ${local?"You're opening the file directly (file://) which browsers restrict — hosting it on GitHub Pages/Netlify makes auto-fetch reliable. ":""}You can still enter scores manually on the Scores tab.`);
-      setFetching(false);
-      return;
-    }
-
-    const matches = data.matches;
-    const newScores = {...scores};
-    let updated = 0;
-    matches.forEach(m=>{
-      const stage = m.stage||"";
-      if(!stage.includes("GROUP")) return;
-      const hn = normalise(m.homeTeam?.name||"");
-      const an = normalise(m.awayTeam?.name||"");
-      const ft = m.score?.fullTime;
-      if(!ft||ft.home==null||ft.away==null) return;
-      const fix = GROUP_FIXTURES.find(f=>(f.home===hn&&f.away===an)||(f.home===an&&f.away===hn));
-      if(!fix) return;
-      const flipped = fix.home!==hn;
-      const hGoals = flipped?ft.away:ft.home;
-      const aGoals = flipped?ft.home:ft.away;
-      const existing = newScores[fix.id];
-      if(!existing||String(existing.home)!==String(hGoals)||String(existing.away)!==String(aGoals)){
-        newScores[fix.id]={home:String(hGoals),away:String(aGoals)};
-        updated++;
-      }
-    });
-    setScores(newScores);
-    const ts = new Date().toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit"});
-    setLastFetch(ts);
-    setFetchError(updated>0?`✓ Updated ${updated} score${updated!==1?"s":""} from live data (${ts})`:`✓ All scores up to date (${ts})`);
-    setFetching(false);
-  };
-
-  // Auto-fetch on load
-  useEffect(()=>{ fetchScores(); },[]);
+    persist({names,assignments,drawn,scores,ko,overrides});
+  },[names,assignments,drawn,scores,ko,overrides]);
 
   const cPts = useMemo(()=>{
     if(!drawn||!assignments)return{};
@@ -789,7 +703,6 @@ function App(){
             <span>14 players · 3 teams each</span>
             <span style={{color:"#5a4a30",background:"rgba(201,168,76,0.1)",padding:"1px 7px",borderRadius:10,fontSize:9,letterSpacing:0.5}}>{APP_VERSION}</span>
             {saved&&<span style={{color:"#95e17d"}}>✓ saved</span>}
-            {lastFetch&&<span style={{color:"#6a9fd4"}}>⟳ scores: {lastFetch}</span>}
           </div>
         </div>
         <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
@@ -800,19 +713,9 @@ function App(){
             </button>
           ))}
           <div style={{width:1,height:20,background:"rgba(255,255,255,0.1)",margin:"0 3px"}}/>
-          <button onClick={fetchScores} disabled={fetching} title="Refresh live scores from football-data.org" style={{...tabSty(false),color:fetching?"#555":"#6a9fd4",borderColor:"rgba(106,159,212,0.3)"}}>
-            {fetching?"⟳ Fetching…":"⟳ Refresh Scores"}
-          </button>
           <button onClick={()=>setShowExport(v=>!v)} style={{...tabSty(showExport)}}>📤 Export/Import</button>
         </div>
       </div>
-
-      {/* Fetch status bar */}
-      {fetchError&&(
-        <div style={{background:fetchError.startsWith("⚠️")?"rgba(255,80,80,0.08)":"rgba(149,225,125,0.06)",borderBottom:"1px solid rgba(201,168,76,0.1)",padding:"6px 20px",fontSize:12,color:fetchError.startsWith("⚠️")?"#ff9999":"#95e17d"}}>
-          {fetchError}
-        </div>
-      )}
 
       {/* Export/Import panel */}
       {showExport&&(
@@ -978,13 +881,8 @@ function App(){
         {/* ── SCORES ── */}
         {tab==="scores"&&drawn&&(
           <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:10}}>
-              <div style={secTitle}>⚽ Match Scores</div>
-              <button onClick={fetchScores} disabled={fetching} style={{...gBtn,background:"rgba(106,159,212,0.15)",borderColor:"rgba(106,159,212,0.4)",color:"#6a9fd4"}}>
-                {fetching?"⟳ Fetching…":"⟳ Refresh Live Scores"}
-              </button>
-            </div>
-            <p style={{color:"#a89070",fontSize:13,marginBottom:14}}>Scores auto-fetched from football-data.org. You can also edit manually.</p>
+            <div style={secTitle}>⚽ Match Scores</div>
+            <p style={{color:"#a89070",fontSize:13,marginBottom:14}}>Enter scores as matches finish — points calculate automatically.</p>
             <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:16}}>
               {Object.keys(GROUPS).map(g=>{
                 const done=GROUP_FIXTURES.filter(f=>f.group===g).filter(f=>{const sc=scores[f.id];return sc?.home!=null&&sc?.home!==""&&sc?.away!=null&&sc?.away!=="";}).length;
@@ -1259,7 +1157,7 @@ function App(){
       </div>
 
       <div style={{textAlign:"center",padding:"14px",borderTop:"1px solid rgba(201,168,76,0.07)",color:"#3a3020",fontSize:11,marginTop:10}}>
-        FIFA World Cup 2026 · June 11–July 19 · USA, Canada &amp; Mexico · Scores via football-data.org
+        FIFA World Cup 2026 · June 11–July 19 · USA, Canada &amp; Mexico · 48 Teams · 104 Matches
       </div>
     </div>
   );

@@ -24,7 +24,7 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
-const APP_VERSION = "v2.3 · 23 Jun";
+const APP_VERSION = "v2.4 · 23 Jun";
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "wc2026-sweepstake";
@@ -230,7 +230,7 @@ const ALL_TEAMS = {
 const ELITE_SET = new Set(ALL_TEAMS.elite.map(t=>t.name));
 const UNDERDOG_SET = new Set(ALL_TEAMS.underdog.map(t=>t.name));
 const ALL_14 = [...ALL_TEAMS.elite,...ALL_TEAMS.contender,...ALL_TEAMS.underdog];
-const PTS = {groupWin:1,reachR32:2,groupTop:4,r32Win:2,r16Win:3,qfWin:5,sfWin:8,finalWin:12,champion:20,fiveGoals:2,underdogElite:5,goldenBoot:5};
+const PTS = {groupWin:1,reachR32:2,groupTop:2,r32Win:2,r16Win:3,qfWin:5,sfWin:8,finalWin:12,champion:20,fiveGoals:2,underdogElite:5,goldenBoot:5};
 
 const PRESET_NAMES = ["Terrie","Olivia","Roger","Felix","Lynette","Matt","Alvin","Jake","Ai Fen","James","Joe","Ruth","Natale","Thomas"];
 const PRESET_ASSIGNMENTS = {
@@ -598,7 +598,7 @@ function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignme
       {champion&&<div style={{marginBottom:16,padding:"10px 16px",background:"rgba(201,168,76,0.12)",border:`1px solid ${GOLD}`,borderRadius:8,fontSize:15,color:"#f5d78e",fontWeight:700}}>🎖️ Champion: {FLAGS[champion]} {champion}{teamOwner[champion]?` — ${teamOwner[champion]}`:""}</div>}
 
       <div style={{overflowX:"auto",paddingBottom:12}}>
-        <div style={{display:"flex",gap:12,minWidth:1180,justifyContent:"center"}}>
+        <div style={{display:"flex",gap:12,minWidth:1480,justifyContent:"flex-start"}}>
           {/* LEFT SIDE */}
           <Column round="r32" roundIdx={0} side="L" label="R32" pts={PTS.r32Win}/>
           <Column round="r16" roundIdx={1} side="L" label="R16" pts={PTS.r16Win}/>

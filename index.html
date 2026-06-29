@@ -24,7 +24,7 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
-const APP_VERSION = "v2.4 · 23 Jun";
+const APP_VERSION = "v2.5 · 23 Jun";
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "wc2026-sweepstake";
@@ -512,7 +512,25 @@ function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignme
   const setScore=(round,mi,side,val)=>{
     const key=`${round}-${mi}`;
     const ns={...koScores,[key]:{...(koScores[key]||{}),[side]:val}};
-    syncToKo(entrants,winners,ns);
+    const sc=ns[key];
+    const [t1,t2]=getMatchTeams(round,mi);
+    const hg=sc.home!==""&&sc.home!=null?parseInt(sc.home):null;
+    const ag=sc.away!==""&&sc.away!=null?parseInt(sc.away):null;
+    // Auto-advance the winner when both scores entered and decisive
+    if(hg!=null&&ag!=null&&!isNaN(hg)&&!isNaN(ag)&&hg!==ag){
+      const autoWinner=hg>ag?t1:t2;
+      const nw=JSON.parse(JSON.stringify(winners));
+      nw[round][mi]=autoWinner;
+      const order=["r32","r16","qf","sf","final"];
+      const ri=order.indexOf(round);
+      for(let k=ri+1;k<order.length;k++){
+        const len={r16:8,qf:4,sf:2,final:1}[order[k]];
+        nw[order[k]]=Array(len).fill("");
+      }
+      syncToKo(entrants,nw,ns);
+    } else {
+      syncToKo(entrants,winners,ns);
+    }
   };
 
   const getMatchTeams=(round,matchIdx)=>{
@@ -523,17 +541,22 @@ function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignme
 
   const champion = winners.final[0]||"";
 
-  // One match block (two teams, score inputs, winner pick)
+  // One match block (two teams, score inputs; winner auto from score, click name for penalty winner)
   const MatchBlock=({round,mi})=>{
     const [t1,t2]=getMatchTeams(round,mi);
     const w=winners[round][mi];
     const sc=koScores[`${round}-${mi}`]||{};
     const isR32=round==="r32";
+    const hg=sc.home!==""&&sc.home!=null?parseInt(sc.home):null;
+    const ag=sc.away!==""&&sc.away!=null?parseInt(sc.away):null;
+    const level=hg!=null&&ag!=null&&!isNaN(hg)&&!isNaN(ag)&&hg===ag;
     const TeamRow=({team,slotIdx,side})=>{
       const isSweep=sweepTeams.has(team);
       const isWin=w===team&&!!team;
       const goals=sc[side];
       const five=goals!==""&&goals!=null&&parseInt(goals)>=5;
+      // clicking a team name picks the winner (used for penalties when level, or manual override)
+      const clickable=team&&!isR32;
       return(
         <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:3}}>
           {isR32?(
@@ -543,9 +566,9 @@ function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignme
               {ALL_NATIONS.map(t=><option key={t} value={t}>{t}</option>)}
             </select>
           ):(
-            <div onClick={team?()=>pickWinner(round,mi,team):null} title={teamOwner[team]?`${team} — ${teamOwner[team]}`:team}
-              style={{flex:1,minWidth:0,cursor:team?"pointer":"default",background:isWin?"rgba(201,168,76,0.22)":"rgba(255,255,255,0.04)",border:`1px solid ${isWin?GOLD:isSweep?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.08)"}`,borderRadius:5,color:isWin?"#f5d78e":team?(isSweep?GOLD:"#bbb"):"#555",fontSize:10,fontWeight:isWin?700:400,padding:"3px 5px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-              {team?<>{FLAGS[team]||""} {team}{isSweep?" ★":""}</>:<span style={{fontStyle:"italic"}}>—</span>}
+            <div onClick={clickable?()=>pickWinner(round,mi,team):null} title={level?`Click to set ${team} as penalty winner`:(teamOwner[team]?`${team} — ${teamOwner[team]}`:team)}
+              style={{flex:1,minWidth:0,cursor:clickable?"pointer":"default",background:isWin?"rgba(201,168,76,0.22)":"rgba(255,255,255,0.04)",border:`1px solid ${isWin?GOLD:isSweep?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.08)"}`,borderRadius:5,color:isWin?"#f5d78e":team?(isSweep?GOLD:"#bbb"):"#555",fontSize:10,fontWeight:isWin?700:400,padding:"3px 5px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {team?<>{FLAGS[team]||""} {team}{isSweep?" ★":""}{isWin?" ✓":""}</>:<span style={{fontStyle:"italic"}}>—</span>}
             </div>
           )}
           <input type="number" min="0" max="99" value={goals??""} onChange={e=>setScore(round,mi,side,e.target.value)}
@@ -557,17 +580,19 @@ function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignme
       <div style={{border:`1px solid ${w?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:7,padding:"5px",background:"rgba(255,255,255,0.015)"}}>
         <TeamRow team={t1} slotIdx={0} side="home"/>
         <TeamRow team={t2} slotIdx={1} side="away"/>
-        {isR32&&(t1||t2)&&(
+        {level&&!isR32&&<div style={{fontSize:8,color:"#c99",textAlign:"center",marginTop:1}}>level — click winner (pens)</div>}
+        {level&&isR32&&(t1||t2)&&(
           <div style={{display:"flex",gap:3,marginTop:2}}>
-            {t1&&<button onClick={()=>pickWinner("r32",mi,t1)} style={{flex:1,fontSize:9,padding:"2px",borderRadius:4,cursor:"pointer",fontFamily:"Georgia,serif",background:w===t1?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.04)",border:`1px solid ${w===t1?GOLD:"rgba(255,255,255,0.1)"}`,color:w===t1?"#f5d78e":"#888"}}>▲ win</button>}
-            {t2&&<button onClick={()=>pickWinner("r32",mi,t2)} style={{flex:1,fontSize:9,padding:"2px",borderRadius:4,cursor:"pointer",fontFamily:"Georgia,serif",background:w===t2?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.04)",border:`1px solid ${w===t2?GOLD:"rgba(255,255,255,0.1)"}`,color:w===t2?"#f5d78e":"#888"}}>▼ win</button>}
+            <div style={{fontSize:8,color:"#c99",alignSelf:"center",marginRight:2}}>pens:</div>
+            {t1&&<button onClick={()=>pickWinner("r32",mi,t1)} style={{flex:1,fontSize:9,padding:"2px",borderRadius:4,cursor:"pointer",fontFamily:"Georgia,serif",background:w===t1?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.04)",border:`1px solid ${w===t1?GOLD:"rgba(255,255,255,0.1)"}`,color:w===t1?"#f5d78e":"#888"}}>{FLAGS[t1]}</button>}
+            {t2&&<button onClick={()=>pickWinner("r32",mi,t2)} style={{flex:1,fontSize:9,padding:"2px",borderRadius:4,cursor:"pointer",fontFamily:"Georgia,serif",background:w===t2?"rgba(201,168,76,0.3)":"rgba(255,255,255,0.04)",border:`1px solid ${w===t2?GOLD:"rgba(255,255,255,0.1)"}`,color:w===t2?"#f5d78e":"#888"}}>{FLAGS[t2]}</button>}
           </div>
         )}
       </div>
     );
   };
 
-  const ROW_H=104;
+  const ROW_H=78;
   // Column renderer for one side. side="L" uses matches 0..n/2-1, side="R" uses the rest.
   const Column=({round,roundIdx,side,label,pts})=>{
     const total={r32:16,r16:8,qf:4,sf:2,final:1}[round];
@@ -597,8 +622,8 @@ function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignme
       </p>
       {champion&&<div style={{marginBottom:16,padding:"10px 16px",background:"rgba(201,168,76,0.12)",border:`1px solid ${GOLD}`,borderRadius:8,fontSize:15,color:"#f5d78e",fontWeight:700}}>🎖️ Champion: {FLAGS[champion]} {champion}{teamOwner[champion]?` — ${teamOwner[champion]}`:""}</div>}
 
-      <div style={{overflowX:"auto",paddingBottom:12}}>
-        <div style={{display:"flex",gap:12,minWidth:1480,justifyContent:"flex-start"}}>
+      <div style={{overflow:"auto",paddingBottom:12,maxHeight:"72vh",border:"1px solid rgba(201,168,76,0.1)",borderRadius:8}}>
+        <div style={{display:"flex",gap:12,minWidth:1480,justifyContent:"flex-start",padding:"4px"}}>
           {/* LEFT SIDE */}
           <Column round="r32" roundIdx={0} side="L" label="R32" pts={PTS.r32Win}/>
           <Column round="r16" roundIdx={1} side="L" label="R16" pts={PTS.r16Win}/>
@@ -610,7 +635,7 @@ function KnockoutLadder({ko, setKo, scores, rankings, standings, drawn, assignme
             <div style={{color:GOLD,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8,textAlign:"center",minHeight:28}}>
               🏆 Final<div style={{color:"#555",fontSize:9,fontWeight:400}}>+{PTS.finalWin} / 🎖️+{PTS.champion}</div>
             </div>
-            <div style={{height:ROW_H*16,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+            <div style={{height:ROW_H*8,display:"flex",flexDirection:"column",justifyContent:"center"}}>
               <MatchBlock round="final" mi={0}/>
             </div>
           </div>
